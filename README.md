@@ -23,7 +23,7 @@ By utilizing `pydivert` (WinDivert), it actively intercepts and drops malicious 
 ### 1️⃣ Hybrid ML + Rule-Based Filtering
 Combines Machine Learning detection with rule-based blacklist filtering to identify and block suspicious traffic in real time.
 
-<img src="screenshots/ml_rule_based_filtering.png" width="600"/>
+<img src="screenshot/ml_rule_based_filtering.png" width="600"/>
 
 <p align="center">
 <b>Action:</b> Malicious packets and blacklisted IP traffic are automatically blocked.
@@ -34,7 +34,7 @@ Combines Machine Learning detection with rule-based blacklist filtering to ident
 ### 2️⃣ Allowed Legitimate Traffic
 Demonstrates safe and legitimate network traffic being allowed through the firewall without interruption.
 
-<img src="screenshots/allowed_packet.png" width="600"/>
+<img src="screenshot/allowed_packet.png" width="600"/>
 
 <p align="center">
 <b>Status:</b> Legitimate packets are successfully identified and allowed.
