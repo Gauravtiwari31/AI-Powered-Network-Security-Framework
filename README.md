@@ -67,16 +67,17 @@ sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
 
 # (3) Run the firewall
 sudo python3 firewall.py
----
+```
 
 ---
 
 ## © Copyright & License
 
-**Author:** Gaurav Tiwari  
+**Author:** Gaurav Tiwari
 
-This project is provided for educational and portfolio purposes only.  
-Unauthorized copying, redistribution, modification, or commercial use of this project is prohibited without explicit permission from the author.
+This project is provided for educational and portfolio purposes only.
+
+Unauthorized copying, redistribution, modification, or commercial use of this project is prohibited without explicit permission.
 
 You may fork this repository for personal learning and research purposes, but you may not claim this work as your own.
 
