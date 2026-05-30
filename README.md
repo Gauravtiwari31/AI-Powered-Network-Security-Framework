@@ -67,7 +67,7 @@ sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
 
 # (3) Run the firewall
 sudo python3 firewall.py
-
+---
 
 ---
 
