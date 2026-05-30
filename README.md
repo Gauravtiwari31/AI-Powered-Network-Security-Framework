@@ -69,6 +69,15 @@ sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
 sudo python3 firewall.py
 
 
-##  ©️ Copyright & License
-**Author:** Gaurav Tiwari
-This project is proprietary. All Rights Reserved. You may fork this repository for personal/educational viewing, but you may not republish, distribute, or claim this code as your own without explicit permission. See the `LICENSE` file for details.
+---
+
+## © Copyright & License
+
+**Author:** Gaurav Tiwari  
+
+This project is provided for educational and portfolio purposes only.  
+Unauthorized copying, redistribution, modification, or commercial use of this project is prohibited without explicit permission from the author.
+
+You may fork this repository for personal learning and research purposes, but you may not claim this work as your own.
+
+See the `LICENSE` file for more details.
