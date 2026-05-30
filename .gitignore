@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+firewall.log
+# Ignore large datasets
+datasets/
