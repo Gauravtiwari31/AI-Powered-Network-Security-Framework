@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Powered Network Security Framework — Seven layers of packet inspection</title>
+<meta name="description" content="An open-source Python firewall with seven layers of packet inspection: static rules, fragment sanity, signature DPI over reassembled streams, entropy heuristics, behavioural detection, JA3 fingerprinting, and flow-level machine learning.">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================================
+   Design tokens — from ui-ux-pro-max "Code dark + run green" palette
+   ========================================================================== */
+:root{
+  --bg:#0F172A;
+  --bg-deep:#080D1A;
+  --surface:#1E293B;
+  --surface-2:#334155;
+  --line:rgba(148,163,184,.16);
+  --line-strong:rgba(148,163,184,.32);
+
+  --text:#F8FAFC;
+  --muted:#94A3B8;      /* 6.96:1 on --bg */
+  --muted-2:#7E8EA6;    /* 5.36:1 on --bg — #64748B measured 3.75:1 and failed */
+
+  --run:#22C55E;          /* CTA / allow */
+  --run-dim:rgba(34,197,94,.12);
+  --threat:#F43F5E;       /* block */
+  --threat-dim:rgba(244,63,94,.12);
+  --signal:#38BDF8;       /* data / info */
+  --signal-dim:rgba(56,189,248,.12);
+  --warn:#FBBF24;
+
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+
+  --r-sm:8px; --r:14px; --r-lg:20px;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --t:220ms;
+
+  --z-nav:50; --z-top:30; --z-mid:20; --z-base:10;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:17px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+h1,h2,h3,h4{line-height:1.15;letter-spacing:-.02em;margin:0;text-wrap:balance}
+p{margin:0}
+a{color:inherit}
+img,svg{max-width:100%}
+::selection{background:rgba(34,197,94,.28)}
+
+.wrap{width:100%;max-width:1200px;margin:0 auto;padding:0 20px}
+@media(min-width:768px){.wrap{padding:0 32px}}
+
+.mono{font-family:var(--mono)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Focus — visible for keyboard users only */
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--run);outline-offset:3px;border-radius:4px}
+
+/* ==========================================================================
+   Ambient background
+   ========================================================================== */
+.grid-bg{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(148,163,184,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(148,163,184,.045) 1px,transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(ellipse 90% 60% at 50% 0%,#000 30%,transparent 78%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 60% at 50% 0%,#000 30%,transparent 78%);
+}
+.glow{
+  position:fixed;z-index:0;pointer-events:none;border-radius:50%;
+  filter:blur(120px);opacity:.5;
+}
+.glow-a{top:-220px;left:50%;transform:translateX(-60%);width:760px;height:420px;background:rgba(34,197,94,.16)}
+.glow-b{top:340px;right:-180px;width:520px;height:520px;background:rgba(56,189,248,.10)}
+
+/* ==========================================================================
+   Nav — floating, inset from edges
+   ========================================================================== */
+.nav{
+  position:fixed;top:16px;left:16px;right:16px;z-index:var(--z-nav);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  max-width:1180px;margin:0 auto;
+  padding:10px 12px 10px 18px;
+  background:rgba(15,23,42,.78);
+  border:1px solid var(--line);
+  border-radius:var(--r);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+}
+.brand{display:flex;align-items:center;gap:11px;font-weight:600;letter-spacing:-.01em;text-decoration:none;font-size:15px}
+.brand-mark{
+  display:grid;place-items:center;width:34px;height:34px;flex:none;
+  border-radius:9px;background:linear-gradient(145deg,#1E293B,#0F172A);
+  border:1px solid var(--line-strong);color:var(--run);
+}
+.brand small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted-2);font-weight:500;letter-spacing:.04em}
+.nav-links{display:none;gap:6px;align-items:center}
+@media(min-width:900px){.nav-links{display:flex}}
+.nav-links a{
+  padding:9px 13px;border-radius:9px;text-decoration:none;
+  font-size:14.5px;color:var(--muted);
+  transition:color var(--t) var(--ease),background var(--t) var(--ease);
+}
+.nav-links a:hover{color:var(--text);background:rgba(148,163,184,.09)}
+
+/* ==========================================================================
+   Buttons — 44px min touch target
+   ========================================================================== */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  min-height:44px;padding:11px 20px;border-radius:10px;
+  font-family:var(--sans);font-size:15px;font-weight:600;
+  text-decoration:none;cursor:pointer;border:1px solid transparent;
+  transition:background var(--t) var(--ease),border-color var(--t) var(--ease),color var(--t) var(--ease),box-shadow var(--t) var(--ease);
+  white-space:nowrap;
+}
+.btn-primary{background:var(--run);color:#052E14;box-shadow:0 0 0 0 rgba(34,197,94,.45)}
+.btn-primary:hover{background:#16A34A;box-shadow:0 6px 26px -6px rgba(34,197,94,.6)}
+.btn-ghost{background:rgba(148,163,184,.07);border-color:var(--line-strong);color:var(--text)}
+.btn-ghost:hover{background:rgba(148,163,184,.14);border-color:var(--muted-2)}
+.btn-sm{min-height:44px;padding:10px 15px;font-size:14px}
+
+/* ==========================================================================
+   Section scaffolding
+   ========================================================================== */
+main{position:relative;z-index:var(--z-base)}
+section{padding:88px 0;position:relative}
+@media(min-width:768px){section{padding:120px 0}}
+
+.eyebrow{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:12px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--run);
+  padding:6px 12px;border-radius:999px;
+  background:var(--run-dim);border:1px solid rgba(34,197,94,.24);
+}
+.eyebrow.signal{color:var(--signal);background:var(--signal-dim);border-color:rgba(56,189,248,.24)}
+.eyebrow.threat{color:var(--threat);background:var(--threat-dim);border-color:rgba(244,63,94,.24)}
+
+.h2{font-size:clamp(30px,5vw,46px);font-weight:700;margin:20px 0 16px}
+.lede{font-size:clamp(16.5px,2vw,19px);color:var(--muted);max-width:65ch;line-height:1.7}
+.section-head{max-width:760px;margin-bottom:52px}
+
+/* ==========================================================================
+   Hero
+   ========================================================================== */
+.hero{padding-top:140px;padding-bottom:64px}
+@media(min-width:768px){.hero{padding-top:180px;padding-bottom:88px}}
+.hero-grid{display:grid;gap:52px;align-items:center}
+@media(min-width:1024px){.hero-grid{grid-template-columns:1fr 1fr;gap:56px}}
+
+.hero h1{font-size:clamp(38px,6.6vw,66px);font-weight:700;margin:22px 0 22px;letter-spacing:-.035em}
+.hero h1 em{font-style:normal;color:var(--run);position:relative;white-space:nowrap}
+.hero p.lede{font-size:clamp(17px,2.1vw,19.5px)}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+
+.hero-stats{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin-top:44px;
+  background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;
+}
+@media(min-width:560px){.hero-stats{grid-template-columns:repeat(4,1fr)}}
+.hero-stats div{background:var(--bg);padding:16px 14px}
+.hero-stats b{display:block;font-family:var(--mono);font-size:24px;font-weight:700;color:var(--text);letter-spacing:-.02em}
+.hero-stats span{font-size:12.5px;color:var(--muted-2);line-height:1.4;display:block;margin-top:3px}
+
+/* Terminal */
+.term{
+  border:1px solid var(--line-strong);border-radius:var(--r-lg);
+  background:linear-gradient(170deg,#111C31,#0A1122);
+  box-shadow:0 30px 70px -30px rgba(0,0,0,.9),0 0 0 1px rgba(255,255,255,.02) inset;
+  overflow:hidden;
+}
+.term-bar{
+  display:flex;align-items:center;gap:9px;padding:12px 15px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.02);
+}
+.dot{width:11px;height:11px;border-radius:50%;flex:none}
+.term-title{
+  font-family:var(--mono);font-size:12px;color:var(--muted-2);
+  margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.term-body{
+  padding:18px 16px 20px;font-family:var(--mono);font-size:12.6px;line-height:1.85;
+  overflow-x:auto;min-height:344px;
+}
+@media(min-width:480px){.term-body{font-size:13.2px;padding:20px}}
+.term-body .row{display:block;white-space:pre;opacity:0}
+.term-body .row.in{opacity:1}
+.c-mute{color:var(--muted-2)}
+.c-run{color:var(--run)}
+.c-threat{color:var(--threat)}
+.c-signal{color:var(--signal)}
+.c-warn{color:var(--warn)}
+.c-text{color:#CBD5E1}
+.caret{display:inline-block;width:8px;height:15px;background:var(--run);vertical-align:-2px;animation:blink 1.1s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+
+/* ==========================================================================
+   Pipeline — the 7 layers
+   ========================================================================== */
+.pipeline{
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  background:rgba(30,41,59,.34);padding:12px;
+  display:grid;gap:10px;
+}
+@media(min-width:768px){.pipeline{grid-template-columns:repeat(4,1fr);padding:16px;gap:12px}}
+@media(min-width:1100px){.pipeline{grid-template-columns:repeat(7,1fr)}}
+.layer{
+  position:relative;padding:16px 14px;border-radius:var(--r);
+  background:var(--bg-deep);border:1px solid var(--line);
+  transition:border-color var(--t) var(--ease),transform var(--t) var(--ease),background var(--t) var(--ease);
+}
+.layer:hover{border-color:rgba(34,197,94,.45);background:#0B1220;transform:translateY(-2px)}
+.layer-n{
+  font-family:var(--mono);font-size:10.5px;font-weight:700;color:var(--run);
+  letter-spacing:.1em;display:block;margin-bottom:9px;
+}
+.layer h3{font-size:14.5px;font-weight:600;margin-bottom:5px}
+.layer p{font-size:12.8px;color:var(--muted-2);line-height:1.5}
+
+/* ==========================================================================
+   Bento grid
+   ========================================================================== */
+.bento{display:grid;gap:16px;grid-template-columns:1fr}
+@media(min-width:700px){.bento{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1024px){.bento{grid-template-columns:repeat(3,1fr)}}
+.card{
+  position:relative;padding:26px 24px;border-radius:var(--r-lg);
+  background:linear-gradient(165deg,rgba(30,41,59,.62),rgba(15,23,42,.5));
+  border:1px solid var(--line);
+  transition:border-color var(--t) var(--ease),transform var(--t) var(--ease),background var(--t) var(--ease);
+  overflow:hidden;
+}
+.card:hover{border-color:var(--line-strong);background:linear-gradient(165deg,rgba(30,41,59,.85),rgba(15,23,42,.6))}
+.card-icon{
+  display:grid;place-items:center;width:42px;height:42px;border-radius:11px;margin-bottom:17px;
+  background:var(--run-dim);border:1px solid rgba(34,197,94,.24);color:var(--run);
+}
+.card-icon.signal{background:var(--signal-dim);border-color:rgba(56,189,248,.24);color:var(--signal)}
+.card-icon.threat{background:var(--threat-dim);border-color:rgba(244,63,94,.24);color:var(--threat)}
+.card h3{font-size:19px;font-weight:600;margin-bottom:9px}
+.card p{font-size:15px;color:var(--muted);line-height:1.62}
+.card code{
+  font-family:var(--mono);font-size:12.6px;color:var(--signal);
+  background:rgba(56,189,248,.09);padding:1px 6px;border-radius:5px;
+  border:1px solid rgba(56,189,248,.16);white-space:nowrap;
+}
+.span-2{grid-column:span 1}
+@media(min-width:700px){.span-2{grid-column:span 2}}
+
+/* ==========================================================================
+   Before / after
+   ========================================================================== */
+.compare{display:grid;gap:18px}
+@media(min-width:900px){.compare{grid-template-columns:1fr 1fr;gap:22px}}
+.panel{
+  border-radius:var(--r-lg);padding:26px 24px;border:1px solid var(--line);
+  background:rgba(15,23,42,.6);
+}
+.panel.bad{border-color:rgba(244,63,94,.3);background:linear-gradient(165deg,rgba(244,63,94,.07),rgba(15,23,42,.6))}
+.panel.good{border-color:rgba(34,197,94,.3);background:linear-gradient(165deg,rgba(34,197,94,.07),rgba(15,23,42,.6))}
+.panel h3{font-size:17px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:10px}
+.panel .sub{font-family:var(--mono);font-size:12px;color:var(--muted-2);margin-bottom:20px;letter-spacing:.02em}
+.metric{
+  display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+  padding:13px 0;border-top:1px solid var(--line);
+}
+.metric:first-of-type{border-top:0}
+.metric .k{font-size:14.2px;color:var(--muted);line-height:1.45}
+.metric .v{font-family:var(--mono);font-size:16px;font-weight:700;white-space:nowrap;flex:none}
+.v.bad{color:var(--threat)}
+.v.good{color:var(--run)}
+
+/* Feature-density bar */
+.density{margin-top:26px}
+.density-label{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--muted-2);margin-bottom:9px}
+.bar{height:26px;border-radius:7px;overflow:hidden;display:flex;border:1px solid var(--line);background:var(--bg-deep)}
+.bar i{display:block;height:100%;font-style:normal}
+.bar .live{background:repeating-linear-gradient(45deg,rgba(34,197,94,.85),rgba(34,197,94,.85) 6px,rgba(34,197,94,.6) 6px,rgba(34,197,94,.6) 12px)}
+.bar .dead{background:repeating-linear-gradient(45deg,rgba(244,63,94,.28),rgba(244,63,94,.28) 6px,rgba(244,63,94,.16) 6px,rgba(244,63,94,.16) 12px)}
+
+/* ==========================================================================
+   Code blocks
+   ========================================================================== */
+.code{
+  border:1px solid var(--line-strong);border-radius:var(--r);
+  background:var(--bg-deep);overflow:hidden;
+}
+.code-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:11px 15px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02);
+}
+.code-head span{font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:600}
+.code pre{
+  margin:0;padding:17px 16px;overflow-x:auto;
+  font-family:var(--mono);font-size:13px;line-height:1.8;color:#CBD5E1;
+}
+.code pre .cm{color:var(--muted-2)}
+.code pre .pr{color:var(--run)}
+
+.tabs{display:flex;gap:7px;margin-bottom:16px;flex-wrap:wrap}
+.tab{
+  min-height:44px;padding:11px 16px;border-radius:9px;cursor:pointer;
+  font-family:var(--mono);font-size:13px;font-weight:600;
+  background:rgba(148,163,184,.07);border:1px solid var(--line);color:var(--muted);
+  transition:background var(--t) var(--ease),color var(--t) var(--ease),border-color var(--t) var(--ease);
+}
+.tab:hover{color:var(--text);background:rgba(148,163,184,.13)}
+.tab[aria-selected="true"]{background:var(--run-dim);border-color:rgba(34,197,94,.42);color:var(--run)}
+
+/* ==========================================================================
+   Spec table
+   ========================================================================== */
+.spec-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg)}
+table{border-collapse:collapse;width:100%;min-width:560px}
+th,td{text-align:left;padding:15px 20px;border-bottom:1px solid var(--line);font-size:14.6px}
+th{
+  font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--muted-2);font-weight:600;background:rgba(255,255,255,.02);
+}
+td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+td:last-child{color:var(--muted)}
+tr:last-child td{border-bottom:0}
+
+/* ==========================================================================
+   Note / CTA / footer
+   ========================================================================== */
+.note{
+  display:flex;gap:15px;align-items:flex-start;
+  padding:19px 21px;border-radius:var(--r);
+  background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.26);
+}
+.note svg{flex:none;color:var(--warn);margin-top:2px}
+.note p{font-size:14.6px;color:#E2E8F0;line-height:1.62}
+.note strong{color:var(--warn);font-weight:600}
+
+.cta-box{
+  text-align:center;padding:60px 26px;border-radius:var(--r-lg);
+  border:1px solid var(--line-strong);
+  background:radial-gradient(ellipse 70% 130% at 50% 0%,rgba(34,197,94,.15),transparent 66%),rgba(15,23,42,.75);
+}
+.cta-box h2{font-size:clamp(27px,4.4vw,40px);font-weight:700;margin-bottom:15px}
+.cta-box p{color:var(--muted);max-width:56ch;margin:0 auto 30px;font-size:17px}
+.cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+
+footer{border-top:1px solid var(--line);padding:44px 0;margin-top:20px}
+.foot{display:flex;flex-wrap:wrap;gap:20px;justify-content:space-between;align-items:center}
+.foot p{font-size:13.6px;color:var(--muted-2)}
+.foot nav{display:flex;gap:20px;flex-wrap:wrap}
+.foot nav a{font-size:13.6px;color:var(--muted);text-decoration:none;transition:color var(--t) var(--ease)}
+.foot nav a:hover{color:var(--run)}
+
+/* ==========================================================================
+   Scroll reveal + motion preferences
+   ========================================================================== */
+/* Content is visible by default. The hidden state is only applied once JS has
+   confirmed it can observe and un-hide it again, so a failed IntersectionObserver
+   (or no JS at all) can never leave the page blank. */
+.js-anim .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
+.js-anim .reveal.in{opacity:1;transform:none}
+
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  .reveal{opacity:1;transform:none}
+  .term-body .row{opacity:1}
+  .caret{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg" aria-hidden="true"></div>
+<div class="glow glow-a" aria-hidden="true"></div>
+<div class="glow glow-b" aria-hidden="true"></div>
+
+<!-- ====================== NAV ====================== -->
+<header class="nav">
+  <a class="brand" href="#top">
+    <span class="brand-mark" aria-hidden="true">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>
+      </svg>
+    </span>
+    <span>Netshield<small>ai-powered firewall</small></span>
+  </a>
+  <nav class="nav-links" aria-label="Section navigation">
+    <a href="#layers">Layers</a>
+    <a href="#evidence">Evidence</a>
+    <a href="#features">Features</a>
+    <a href="#start">Quickstart</a>
+    <a href="#specs">Specs</a>
+  </nav>
+  <a class="btn btn-primary btn-sm" href="#start">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+    </svg>
+    Get started
+  </a>
+</header>
+
+<main id="top">
+
+<!-- ====================== HERO ====================== -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="6"/></svg>
+        Open source &middot; Python 3.10+
+      </span>
+
+      <h1>Seven layers between your network and <em>everything else</em>.</h1>
+
+      <p class="lede">
+        A packet-inspection firewall that reads every layer of the stack — static
+        rules, reassembled-stream signatures, Shannon entropy, TLS fingerprints
+        and flow-level machine learning — then scores what it finds instead of
+        letting any single weak signal veto your traffic.
+      </p>
+
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#start">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Run it locally
+        </a>
+        <a class="btn btn-ghost" href="#evidence">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+          </svg>
+          See the measurements
+        </a>
+      </div>
+
+      <div class="hero-stats">
+        <div><b>7</b><span>detection layers</span></div>
+        <div><b>70</b><span>flow features</span></div>
+        <div><b>61</b><span>tests passing</span></div>
+        <div><b>0</b><span>false positives<sup>*</sup></span></div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="term" role="img" aria-label="Terminal showing the firewall inspecting packets: benign HTTPS, DNS and HTTP traffic allowed; a SQL injection, Log4Shell probe, port scan and DNS tunnel blocked.">
+      <div class="term-bar">
+        <span class="dot" style="background:#F43F5E"></span>
+        <span class="dot" style="background:#FBBF24"></span>
+        <span class="dot" style="background:#22C55E"></span>
+        <span class="term-title">python windows_active_firewall.py</span>
+      </div>
+      <div class="term-body" id="term" aria-hidden="true"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== PIPELINE ====================== -->
+<section id="layers">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow signal">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M4 12h16M12 4v16"/></svg>
+        The pipeline
+      </span>
+      <h2 class="h2">Cheapest check first. Most expensive last.</h2>
+      <p class="lede">
+        Every packet walks the same ordered gauntlet. A blacklist hit costs a
+        dictionary lookup; the ML layer only ever sees flows that survived
+        everything before it — and only once a flow is old enough to describe.
+      </p>
+    </div>
+
+    <div class="pipeline reveal">
+      <div class="layer"><span class="layer-n">00</span><h3>Allowlist</h3><p>Loopback, DHCP, link-local. Never dropped, so the engine can't lock you out.</p></div>
+      <div class="layer"><span class="layer-n">01</span><h3>Static rules</h3><p>IP and port blacklists, shared by both platform front-ends.</p></div>
+      <div class="layer"><span class="layer-n">02</span><h3>Fragments</h3><p>Tiny-first-fragment evasion and fragment floods, with bounded state.</p></div>
+      <div class="layer"><span class="layer-n">03</span><h3>Signature DPI</h3><p>Regex over the reassembled stream — not one lonely packet at a time.</p></div>
+      <div class="layer"><span class="layer-n">04</span><h3>Entropy</h3><p>Shannon bits/byte exposes DNS tunnels and packed payloads in cleartext.</p></div>
+      <div class="layer"><span class="layer-n">05</span><h3>Behaviour</h3><p>Sliding windows catch port sweeps and SYN floods per source.</p></div>
+      <div class="layer"><span class="layer-n">06</span><h3>Flow ML</h3><p>RF + LR consensus on real CICFlowMeter features. Monitor-only by default.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== EVIDENCE ====================== -->
+<section id="evidence">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow threat">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>
+        Measured, not claimed
+      </span>
+      <h2 class="h2">The old &ldquo;AI&rdquo; layer was a payload-size threshold.</h2>
+      <p class="lede">
+        The models were trained on CICFlowMeter <em>flow</em> records but were
+        being fed single packets, with 53 of their 70 inputs hardcoded to zero.
+        Replaying identical traffic through both engines is what the numbers
+        below describe — no estimates, no simulation.
+      </p>
+    </div>
+
+    <div class="compare reveal">
+      <div class="panel bad">
+        <h3>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color:var(--threat)"><path d="m15 9-6 6M9 9l6 6"/><circle cx="12" cy="12" r="9"/></svg>
+          Before
+        </h3>
+        <p class="sub">per-packet inference</p>
+        <div class="metric"><span class="k">Benign traffic wrongly blocked</span><span class="v bad">3 / 6</span></div>
+        <div class="metric"><span class="k">Random Forest contribution</span><span class="v bad">0 / 10 fired</span></div>
+        <div class="metric"><span class="k">Logistic Regression on any &ge;64&nbsp;B payload</span><span class="v bad">p = 1.000</span></div>
+        <div class="metric"><span class="k">Model inputs that were constant zero</span><span class="v bad">53 / 70</span></div>
+        <div class="metric"><span class="k">IPv6 packets inspected</span><span class="v bad">0%</span></div>
+        <div class="metric"><span class="k">First fragmented packet</span><span class="v bad">NameError</span></div>
+      </div>
+
+      <div class="panel good">
+        <h3>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--run)"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+          After
+        </h3>
+        <p class="sub">flow-level inference</p>
+        <div class="metric"><span class="k">Benign traffic wrongly blocked</span><span class="v good">0 / 8</span></div>
+        <div class="metric"><span class="k">Attack payloads caught</span><span class="v good">16 / 16</span></div>
+        <div class="metric"><span class="k">ML verdict requires both models to agree</span><span class="v good">RF &amp; LR</span></div>
+        <div class="metric"><span class="k">Model inputs carrying real signal</span><span class="v good">&gt; 40 / 70</span></div>
+        <div class="metric"><span class="k">IPv6 packets inspected</span><span class="v good">100%</span></div>
+        <div class="metric"><span class="k">Engine errors across the suite</span><span class="v good">0</span></div>
+      </div>
+    </div>
+
+    <div class="density reveal">
+      <div class="density-label">
+        <span>ML feature vector, live packet &mdash; before</span>
+        <span style="color:var(--threat)">53 / 70 dead</span>
+      </div>
+      <div class="bar" role="img" aria-label="Before: 17 of 70 model features carried signal, 53 were constant zero.">
+        <i class="live" style="width:24.3%"></i><i class="dead" style="width:75.7%"></i>
+      </div>
+      <div class="density-label" style="margin-top:20px">
+        <span>ML feature vector, tracked flow &mdash; after</span>
+        <span style="color:var(--run)">&lt; 30 / 70 dead</span>
+      </div>
+      <div class="bar" role="img" aria-label="After: more than 40 of 70 model features carry signal.">
+        <i class="live" style="width:58%"></i><i class="dead" style="width:42%"></i>
+      </div>
+    </div>
+
+    <div class="note reveal" style="margin-top:34px">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <p>
+        <strong>The ML layer ships disabled for blocking.</strong> It scores and
+        logs, but never drops a packet until you flip <code style="font-family:var(--mono);font-size:13px">ML_ENFORCE</code>
+        yourself — because a model validated on a 2018 dataset has not been
+        validated on <em>your</em> network. Rules, DPI and heuristics do the
+        enforcing until then.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== FEATURES ====================== -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+        Capabilities
+      </span>
+      <h2 class="h2">What it actually catches</h2>
+      <p class="lede">Every item below is pinned by a test in <code style="font-family:var(--mono);font-size:14px;color:var(--signal)">tests/test_detection.py</code>.</p>
+    </div>
+
+    <div class="bento">
+      <article class="card span-2 reveal">
+        <div class="card-icon">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+        </div>
+        <h3>Stream reassembly defeats split-payload evasion</h3>
+        <p>
+          Splitting <code>UNION SEL</code> / <code>ECT</code> across two TCP
+          segments walked straight past the old per-packet matcher. Signatures
+          now run against a rolling per-direction buffer, so the attack is
+          caught on the segment that completes it.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon signal">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+        </div>
+        <h3>Shannon entropy</h3>
+        <p>
+          Oversized high-entropy DNS payloads mean encoded data, not lookups.
+          Ports that legitimately carry ciphertext are exempt — flagging
+          <code>:443</code> for looking encrypted is nonsense.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon threat">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+        </div>
+        <h3>Scans &amp; floods</h3>
+        <p>
+          Per-source sliding windows flag a sweep at 15 distinct ports in 10s
+          and a flood at 100 SYNs in 5s — while the same ports touched slowly
+          stay allowed.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
+        <h3>JA3 that actually matches</h3>
+        <p>
+          Parsed from raw TLS bytes in wire order with GREASE stripped. Sorting
+          the cipher list — as the old code did — produces hashes no public
+          threat feed can ever match.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon signal">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 6v6c0 5 3.4 8.9 8 10 4.6-1.1 8-5 8-10V6z"/></svg>
+        </div>
+        <h3>Signature set</h3>
+        <p>
+          SQLi (union, tautology, time-based, file-write), XSS, path traversal,
+          SSRF to cloud metadata, command injection, Log4Shell and Shellshock —
+          each carrying its own severity weight.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.6"/><path d="M22 4 12 14.01l-3-3"/></svg>
+        </div>
+        <h3>Threat scoring</h3>
+        <p>
+          Layers contribute weighted evidence and a packet drops at
+          <code>score &ge; 80</code>. One weak signal can no longer veto your
+          traffic on its own.
+        </p>
+      </article>
+
+      <article class="card reveal">
+        <div class="card-icon threat">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/><circle cx="12" cy="12" r="10"/></svg>
+        </div>
+        <h3>IPv6, finally</h3>
+        <p>
+          Parsing every packet as IPv4 gave IPv6 traffic an address of
+          <code>0.0.0.0</code> and a free pass through every rule. Version is
+          now read from the header nibble.
+        </p>
+      </article>
+
+      <article class="card span-2 reveal">
+        <div class="card-icon">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 10h20M7 15h4"/></svg>
+        </div>
+        <h3>One engine, two platforms, bounded memory</h3>
+        <p>
+          Linux (NetfilterQueue) and Windows (WinDivert) are thin transport
+          shims over a single <code>detection_engine.py</code>, so the two can
+          never drift apart. Flow and per-source tables are capped and swept on
+          a timer — a spoofed-source flood can't turn the firewall into the
+          denial-of-service vector.
+        </p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== QUICKSTART ====================== -->
+<section id="start">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        Quickstart
+      </span>
+      <h2 class="h2">Watch it before you arm it</h2>
+      <p class="lede">
+        The demo sniffer classifies live traffic without dropping anything and
+        needs no kernel driver. Start there, then move to active prevention.
+      </p>
+    </div>
+
+    <div class="tabs reveal" role="tablist" aria-label="Choose your platform">
+      <button class="tab" role="tab" id="tab-demo" aria-controls="p-demo" aria-selected="true">Passive demo</button>
+      <button class="tab" role="tab" id="tab-win" aria-controls="p-win" aria-selected="false">Windows</button>
+      <button class="tab" role="tab" id="tab-linux" aria-controls="p-linux" aria-selected="false">Linux</button>
+    </div>
+
+    <div class="code reveal" id="p-demo" role="tabpanel" aria-labelledby="tab-demo">
+      <div class="code-head"><span>passive &mdash; nothing is dropped</span></div>
+<pre><span class="cm"># 1. Install (platform packet driver resolves automatically)</span>
+pip install -r requirements.txt
+
+<span class="cm"># 2. Classify live traffic, block nothing</span>
+python demo_sniffer.py --quiet
+
+<span class="cm"># 3. Prove the layers work</span>
+python -m pytest tests/ -v
+<span class="pr">61 passed</span></pre>
+    </div>
+
+    <div class="code reveal" id="p-win" role="tabpanel" aria-labelledby="tab-win" hidden>
+      <div class="code-head"><span>windows &mdash; run as administrator</span></div>
+<pre><span class="cm"># WinDivert intercepts and drops in the network stack</span>
+python windows_active_firewall.py --monitor   <span class="cm"># log only</span>
+python windows_active_firewall.py             <span class="cm"># enforce</span>
+
+<span class="cm"># Ctrl+C prints a session summary</span></pre>
+    </div>
+
+    <div class="code reveal" id="p-linux" role="tabpanel" aria-labelledby="tab-linux" hidden>
+      <div class="code-head"><span>linux &mdash; run as root</span></div>
+<pre><span class="cm"># Redirect traffic into userspace (v4 and v6)</span>
+sudo iptables  -I INPUT  -j NFQUEUE --queue-num 0
+sudo ip6tables -I INPUT  -j NFQUEUE --queue-num 0
+
+sudo python3 dpi_firewall.py --monitor        <span class="cm"># log only</span>
+sudo python3 dpi_firewall.py                  <span class="cm"># enforce</span>
+
+<span class="cm"># Remove the rules when you are done</span>
+sudo iptables -D INPUT -j NFQUEUE --queue-num 0</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== SPECS ====================== -->
+<section id="specs">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <span class="eyebrow signal">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        Specifications
+      </span>
+      <h2 class="h2">Under the hood</h2>
+    </div>
+
+    <div class="spec-scroll reveal">
+      <table>
+        <caption class="sr-only">Technical specifications of the framework</caption>
+        <thead>
+          <tr><th scope="col">Component</th><th scope="col">Detail</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Language</td><td>Python 3.10+</td></tr>
+          <tr><td>Packet parsing</td><td>Scapy — IPv4 and IPv6, dispatched on the header version nibble</td></tr>
+          <tr><td>Linux interception</td><td>NetfilterQueue via iptables / ip6tables NFQUEUE</td></tr>
+          <tr><td>Windows interception</td><td>pydivert (WinDivert), active drop from the network stack</td></tr>
+          <tr><td>Models</td><td>Random Forest + Logistic Regression, scikit-learn, 70 features</td></tr>
+          <tr><td>Training data</td><td>CSE-CIC-IDS2018 (CIC / University of New Brunswick)</td></tr>
+          <tr><td>Flow features</td><td>CICFlowMeter-compatible; durations in microseconds</td></tr>
+          <tr><td>ML gate</td><td>Abstains below 8 packets; requires RF and LR consensus</td></tr>
+          <tr><td>Block policy</td><td>Weighted threat score, drop at &ge; 80</td></tr>
+          <tr><td>Failure mode</td><td>Configurable fail-open or fail-closed</td></tr>
+          <tr><td>State bounds</td><td>20,000 flows max, 120s idle timeout, LRU eviction</td></tr>
+          <tr><td>Tests</td><td>61 regression tests, each pinning a measured defect</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== CTA ====================== -->
+<section>
+  <div class="wrap">
+    <div class="cta-box reveal">
+      <h2>Read the packets yourself.</h2>
+      <p>
+        Clone it, run the passive sniffer, and watch every layer render its
+        verdict on your own traffic before a single packet is dropped.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#start">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Get started
+        </a>
+        <a class="btn btn-ghost" href="#evidence">Review the evidence</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <p>AI-Powered Network Security Framework &mdash; built by Gaurav Tiwari.<br>
+       <sup>*</sup>Zero false positives across the 8-packet benign sample in the test suite. Educational and portfolio project.</p>
+    <nav aria-label="Footer">
+      <a href="#layers">Layers</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#features">Features</a>
+      <a href="#specs">Specs</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- Terminal ---------- */
+  var LINES = [
+    ['c-mute',   '$ python windows_active_firewall.py'],
+    ['c-mute',   ''],
+    ['c-text',   '  Mode      : ACTIVE PREVENTION'],
+    ['c-text',   '  Block at  : threat score >= 80'],
+    ['c-warn',   '  ML layer  : monitor-only'],
+    ['c-mute',   ''],
+    ['c-run',    '  [allow]   192.168.1.5:51000 -> 1.1.1.1:443    TLS'],
+    ['c-run',    '  [allow]   192.168.1.5:55000 -> 1.1.1.1:53     DNS'],
+    ['c-threat', '  [DROPPED] [DPI] SQLi: UNION SELECT      score=90'],
+    ['c-run',    '  [allow]   192.168.1.5:51001 -> 93.184.216.34  HTTP'],
+    ['c-threat', '  [DROPPED] [DPI] RCE: Log4Shell          score=100'],
+    ['c-threat', '  [DROPPED] [SCAN] port scan from 203.0.113.77'],
+    ['c-signal', '            15 distinct ports in 10s     score=85'],
+    ['c-threat', '  [DROPPED] [TUNNEL] DNS tunnelling, entropy 8.00'],
+    ['c-run',    '  [allow]   93.184.216.34:80 -> 192.168.1.5     HTTP'],
+    ['c-mute',   ''],
+    ['c-signal', '  inspected 9  allowed 5  blocked 4  errors 0']
+  ];
+
+  var term = document.getElementById('term');
+  if (term) {
+    var frag = document.createDocumentFragment();
+    var nodes = [];
+    LINES.forEach(function (line) {
+      var el = document.createElement('span');
+      el.className = 'row ' + line[0];
+      el.textContent = line[1] || ' ';
+      frag.appendChild(el);
+      nodes.push(el);
+    });
+    var caretRow = document.createElement('span');
+    caretRow.className = 'row c-run';
+    caretRow.innerHTML = '  $ <i class="caret"></i>';
+    frag.appendChild(caretRow);
+    nodes.push(caretRow);
+    term.appendChild(frag);
+
+    if (reduced) {
+      nodes.forEach(function (n) { n.classList.add('in'); });
+    } else {
+      nodes.forEach(function (n, i) {
+        setTimeout(function () { n.classList.add('in'); }, 260 + i * 135);
+      });
+    }
+  }
+
+  /* ---------- Scroll reveal ----------
+     Opt in to the hidden state only when we can guarantee un-hiding it. */
+  var revealables = Array.prototype.slice.call(document.querySelectorAll('.reveal'));
+
+  function revealAll() {
+    revealables.forEach(function (el) { el.classList.add('in'); });
+  }
+
+  if (!reduced && 'IntersectionObserver' in window && revealables.length) {
+    document.documentElement.classList.add('js-anim');
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          io.unobserve(entry.target);
+        }
+      });
+    // Positive bottom margin grows the root box downward so a section starts
+    // fading in just before it scrolls into view, rather than after.
+    }, { rootMargin: '0px 0px 140px 0px', threshold: 0.01 });
+
+    revealables.forEach(function (el) { io.observe(el); });
+
+    // Dead-man switch: if the observer never reports (headless render, an
+    // odd embedding context, a throttled background tab), show everything
+    // rather than leaving the page blank.
+    setTimeout(function () {
+      if (!document.querySelector('.reveal.in')) { revealAll(); }
+    }, 1200);
+  }
+
+  /* ---------- Quickstart tabs ---------- */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+
+  function select(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      var panel = document.getElementById(t.getAttribute('aria-controls'));
+      if (panel) { panel.hidden = !on; }
+    });
+  }
+
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener('click', function () { select(tab); });
+    tab.addEventListener('keydown', function (e) {
+      var next = null;
+      if (e.key === 'ArrowRight') { next = tabs[(i + 1) % tabs.length]; }
+      if (e.key === 'ArrowLeft') { next = tabs[(i - 1 + tabs.length) % tabs.length]; }
+      if (next) { e.preventDefault(); next.focus(); select(next); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

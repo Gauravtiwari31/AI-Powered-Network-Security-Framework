@@ -1,108 +1,119 @@
-from netfilterqueue import NetfilterQueue
-from scapy.all import IP, TCP, UDP, Raw, IPv6  # IPv6 is imported for future use
+# basic_firewall.py
+# Author: Gaurav Tiwari
+"""Minimal rule-only firewall -- the teaching example.
 
-# --- Configuration: Define your blocking rules here ---
+This is deliberately the simplest thing that works: IP and port blacklists,
+nothing else. It exists to show the NetfilterQueue plumbing on its own,
+before DPI, heuristics and ML are layered on top in `dpi_firewall.py`.
 
-BLOCKED_IPS = [
-    "8.8.8.8",         # Example: Google Public DNS
-    "192.168.1.100"    # Example: A specific internal IP
-]
+Rules come from `config.py` so this file and the full engine can never
+disagree about what is blocked.
 
-# Ports to block (source OR destination for TCP/UDP)
-BLOCKED_PORTS = [
-    22,    # SSH
-    23,    # Telnet
-    8080   # Common proxy/web server port
-]
+    sudo iptables -I OUTPUT -j NFQUEUE --queue-num 0
+    sudo python3 basic_firewall.py
+"""
 
-# --- Packet Handling Function ---
+import sys
+
+from scapy.all import IP, IPv6, TCP, UDP
+
+from config import ALLOWLISTED_IPS, BLOCKED_IPS, BLOCKED_PORTS
+
+
+def parse_packet(raw_bytes):
+    """Parse as IPv4 or IPv6 based on the version nibble.
+
+    Calling IP() on an IPv6 packet yields src/dst of 0.0.0.0 and every rule
+    silently passes -- which is how IPv6 traffic used to walk straight past
+    this firewall.
+    """
+    if not raw_bytes:
+        return None
+    version = raw_bytes[0] >> 4
+    try:
+        if version == 4:
+            return IP(bytes(raw_bytes))
+        if version == 6:
+            return IPv6(bytes(raw_bytes))
+    except Exception:
+        return None
+    return None
+
+
+def evaluate(packet):
+    """Return a block reason, or None to accept."""
+    layer = packet[IPv6] if IPv6 in packet else packet[IP]
+    src_ip, dst_ip = layer.src, layer.dst
+
+    if src_ip in ALLOWLISTED_IPS or dst_ip in ALLOWLISTED_IPS:
+        return None
+
+    if src_ip in BLOCKED_IPS:
+        return f"source IP {src_ip} is blacklisted"
+    if dst_ip in BLOCKED_IPS:
+        return f"destination IP {dst_ip} is blacklisted"
+
+    for proto, name in ((TCP, "TCP"), (UDP, "UDP")):
+        if proto in packet:
+            sport, dport = packet[proto].sport, packet[proto].dport
+            if sport in BLOCKED_PORTS:
+                return f"source {name} port {sport} is blacklisted"
+            if dport in BLOCKED_PORTS:
+                return f"destination {name} port {dport} is blacklisted"
+            break
+
+    return None
 
 
 def packet_handler(pkt):
-    """
-    This function is called for every packet redirected to our NetfilterQueue.
-    It inspects the packet and decides whether to accept or drop it.
-    """
-
-    # Get the raw payload from NetfilterQueue and convert to a Scapy packet
-    # We assume IPv4 for now; more robust handling for IPv6 can be added later.
-    try:
-        scapy_packet = IP(pkt.get_payload())
-    except Exception as e:
-        print(f"[-] Could not parse packet payload with Scapy: {e}")
-        pkt.accept()  # Accept if cannot parse, to avoid blocking legitimate traffic
+    """NetfilterQueue callback: inspect, then accept or drop."""
+    packet = parse_packet(pkt.get_payload())
+    if packet is None:
+        # Unparseable traffic is accepted rather than silently dropped, so a
+        # protocol this example does not understand cannot break the host.
+        pkt.accept()
         return
 
-    print(f"\n--- New Packet ({pkt.id}) ---")
-    scapy_packet.show()  # Show a detailed view of the packet
-
-    # 1. Basic IP Filtering
-    if IP in scapy_packet:
-        src_ip = scapy_packet[IP].src
-        dst_ip = scapy_packet[IP].dst
-
-        if src_ip in BLOCKED_IPS:
-            print(f"BLOCKING: Source IP {src_ip} is on the blacklist.")
-            pkt.drop()  # Drop the packet
-            return
-        if dst_ip in BLOCKED_IPS:
-            print(f"BLOCKING: Destination IP {dst_ip} is on the blacklist.")
-            pkt.drop()  # Drop the packet
-            return
-
-    # 2. Basic Port Filtering (for TCP and UDP)
-    if TCP in scapy_packet:
-        src_port = scapy_packet[TCP].sport
-        dst_port = scapy_packet[TCP].dport
-        if src_port in BLOCKED_PORTS:
-            print(f"BLOCKING: Source TCP Port {src_port} is on the blacklist.")
-            pkt.drop()
-            return
-        if dst_port in BLOCKED_PORTS:
-            print(
-                f"BLOCKING: Destination TCP Port {dst_port} is on the blacklist.")
-            pkt.drop()
-            return
-    elif UDP in scapy_packet:
-        src_port = scapy_packet[UDP].sport
-        dst_port = scapy_packet[UDP].dport
-        if src_port in BLOCKED_PORTS:
-            print(f"BLOCKING: Source UDP Port {src_port} is on the blacklist.")
-            pkt.drop()
-            return
-        if dst_port in BLOCKED_PORTS:
-            print(
-                f"BLOCKING: Destination UDP Port {dst_port} is on the blacklist.")
-            pkt.drop()
-            return
-
-    # If no blocking rules are matched, accept the packet
-    print("ACCEPTING packet.")
-    pkt.accept()
-
-# --- Main Firewall Execution Logic ---
+    reason = evaluate(packet)
+    if reason:
+        print(f"[DROPPED] {reason}")
+        pkt.drop()
+    else:
+        pkt.accept()
 
 
-def run_firewall():
-    """
-    Initializes NetfilterQueue and binds the packet_handler function to a queue.
-    """
-    nfqueue = NetfilterQueue()
+def run_firewall(queue_num=0):
     try:
-        # Bind to queue 0. This number must match the --queue-num in your iptables rule.
-        nfqueue.bind(0, packet_handler)
-        print("[*] Firewall started, listening on NetfilterQueue 0...")
-        print("[*] Press Ctrl+C to stop.")
-        nfqueue.run()  # Start processing packets redirected by iptables
+        from netfilterqueue import NetfilterQueue
+    except ImportError:
+        print("[-] NetfilterQueue is not installed (Linux only).")
+        print("[-] Try: sudo apt install build-essential python3-dev "
+              "libnetfilter-queue-dev && pip install NetfilterQueue")
+        return 1
+
+    nfqueue = NetfilterQueue()
+    bound = False
+    try:
+        nfqueue.bind(queue_num, packet_handler)
+        bound = True
+        print(f"[*] Basic firewall listening on NFQUEUE {queue_num}. Ctrl+C to stop.")
+        nfqueue.run()
     except KeyboardInterrupt:
         print("\n[*] Firewall stopped by user.")
-    except Exception as e:
-        print(f"[!] An error occurred: {e}")
+    except Exception as exc:
+        print(f"[!] Error: {exc}")
+        print("[!] Ensure you are running as root with the iptables rule loaded.")
+        return 1
     finally:
-        # Clean up the queue binding when the script exits
-        nfqueue.unbind()
+        if bound:
+            try:
+                nfqueue.unbind()
+            except Exception:
+                pass
         print("[*] NetfilterQueue unbound.")
+
+    return 0
 
 
 if __name__ == "__main__":
-    run_firewall()
+    sys.exit(run_firewall())
